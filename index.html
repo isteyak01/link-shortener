@@ -127,6 +127,47 @@
   .btn-primary:hover{background:var(--accent-hover); transform:translateY(-1px);}
   .btn-full{width:100%; margin-top:6px;}
 
+  /* ===== Result Box ===== */
+  .result-box{
+    display:none;
+    margin-top:14px;
+    padding:16px;
+    background:var(--card-2);
+    border:1px solid rgba(59,130,246,.3);
+    border-radius:12px;
+    box-shadow:0 0 20px rgba(59,130,246,.08);
+    animation:fadeIn .4s ease;
+  }
+  @keyframes fadeIn{
+    from{opacity:0; transform:translateY(-8px);}
+    to{opacity:1; transform:translateY(0);}
+  }
+  .result-label{
+    font-size:11px; color:var(--muted); text-transform:uppercase;
+    letter-spacing:1px; margin-bottom:8px; display:flex; align-items:center; gap:6px;
+  }
+  .result-label::before{
+    content:""; width:6px; height:6px; border-radius:50%;
+    background:var(--success); box-shadow:0 0 8px var(--success-glow);
+  }
+  .result-row{display:flex; gap:8px; align-items:stretch;}
+  .result-input{
+    flex:1; padding:12px 14px;
+    background:#0a1424; border:1px solid var(--border);
+    border-radius:8px; color:var(--accent); font-size:13px;
+    font-weight:600; outline:none; font-family:monospace;
+  }
+  .result-input:focus{border-color:var(--accent);}
+  .btn-copy{
+    padding:12px 22px; border:none; border-radius:8px;
+    background:var(--accent); color:#fff;
+    font-size:13px; font-weight:700; cursor:pointer;
+    white-space:nowrap; transition:.2s; font-family:inherit;
+    min-width:90px;
+  }
+  .btn-copy:hover{background:var(--accent-hover); transform:translateY(-1px);}
+  .btn-copy.copied{background:var(--success);}
+
   .link-item{
     background:var(--card-2); border:1px solid var(--border); border-radius:12px;
     padding:14px 16px; margin-bottom:10px; transition:.25s;
@@ -182,10 +223,18 @@
   td{padding:11px 14px; border-bottom:1px solid var(--border); color:var(--text); vertical-align:middle;}
   tbody tr:last-child td{border-bottom:none;}
   tbody tr:hover{background:rgba(59,130,246,.04);}
+
+  /* ===== User Agent — fully visible ===== */
   .ua-cell{
-    max-width:340px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
-    color:var(--muted); font-family:monospace; font-size:11px;
+    min-width:280px;
+    word-break:break-all;
+    white-space:normal;
+    color:var(--muted);
+    font-family:monospace;
+    font-size:11px;
+    line-height:1.5;
   }
+
   .badge{display:inline-block; padding:3px 8px; border-radius:6px; font-size:10px; font-weight:700; letter-spacing:.3px;}
   .badge-device{background:rgba(59,130,246,.12); border:1px solid rgba(59,130,246,.25); color:var(--accent);}
   .badge-os{background:rgba(168,85,247,.12); border:1px solid rgba(168,85,247,.25); color:#a855f7;}
@@ -199,6 +248,7 @@
     background:var(--card); border:1px solid var(--border); border-radius:12px; padding:14px 22px;
     font-size:13px; color:var(--text); box-shadow:0 10px 30px rgba(0,0,0,.5);
     opacity:0; transition:.35s; z-index:9999; pointer-events:none;
+    max-width:90%;
   }
   .toast.show{transform:translateX(-50%) translateY(0); opacity:1;}
   .toast.success{border-color:var(--success)}
@@ -218,6 +268,8 @@
     .filter-btn{width:100%}
     .btn-download{width:100%}
     .spacer{display:none}
+    .result-row{flex-direction:column}
+    .btn-copy{width:100%}
   }
 </style>
 </head>
@@ -282,6 +334,15 @@
       </div>
     </div>
     <button class="btn btn-primary btn-full" onclick="createLink()">Create Short Link</button>
+
+    <!-- ===== Short Link Result Box ===== -->
+    <div class="result-box" id="resultBox">
+      <div class="result-label">Your Short Link is Ready</div>
+      <div class="result-row">
+        <input type="text" class="result-input" id="resultUrl" readonly value="">
+        <button class="btn-copy" id="copyBtn" onclick="copyResult()">Copy</button>
+      </div>
+    </div>
   </div>
 
   <div class="panel">
@@ -327,7 +388,7 @@
             <th>OS</th>
             <th>Browser</th>
             <th>Link</th>
-            <th>User Agent</th>
+            <th style="min-width:280px;">User Agent</th>
           </tr>
         </thead>
         <tbody id="uaTableBody"></tbody>
@@ -397,6 +458,7 @@
   async function loadLinks() {
     try {
       const res = await fetch(API_BASE + "/api/list");
+      if (!res.ok) throw new Error("HTTP " + res.status);
       links = await res.json();
       renderLinks();
       renderStats();
@@ -408,6 +470,7 @@
   async function loadVisits() {
     try {
       const res = await fetch(API_BASE + "/api/visits?range=" + currentRange);
+      if (!res.ok) throw new Error("HTTP " + res.status);
       visits = await res.json();
       renderUserAgents();
     } catch(e) {
@@ -421,6 +484,7 @@
   async function createLink() {
     const codeInput = document.getElementById("inputCode");
     const urlInput = document.getElementById("inputUrl");
+    const resultBox = document.getElementById("resultBox");
 
     let code = codeInput.value.trim().toLowerCase();
     const url = urlInput.value.trim();
@@ -428,7 +492,6 @@
     if (!url) return showToast("Please enter a destination URL", "danger");
     if (!/^https?:\/\//i.test(url)) return showToast("URL must start with http:// or https://", "danger");
 
-    // Auto-generate if empty
     if (!code) {
       code = generateCode(6);
     } else {
@@ -449,12 +512,67 @@
         showToast("Link created: /" + data.code, "success");
         codeInput.value = "";
         urlInput.value = "";
+
+        // ✅ Result box show
+        const shortUrl = API_BASE + "/" + data.code;
+        document.getElementById("resultUrl").value = shortUrl;
+        resultBox.style.display = "block";
+
+        // Reset copy button
+        const btn = document.getElementById("copyBtn");
+        btn.textContent = "Copy";
+        btn.classList.remove("copied");
+
+        // Auto-scroll to result
+        setTimeout(() => {
+          resultBox.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        }, 100);
+
         loadLinks();
       } else {
         showToast(data.error || "Failed to create link", "danger");
       }
     } catch(e) {
-      showToast("Network error", "danger");
+      console.error(e);
+      showToast("Network error. Check API URL.", "danger");
+    }
+  }
+
+  // ==========================================
+  // Copy Result (from result box)
+  // ==========================================
+  function copyResult() {
+    const input = document.getElementById("resultUrl");
+    const btn = document.getElementById("copyBtn");
+    const url = input.value;
+
+    if (!url) {
+      showToast("No link to copy", "danger");
+      return;
+    }
+
+    const doCopy = () => {
+      showToast("Copied: " + url, "success");
+      btn.textContent = "Copied!";
+      btn.classList.add("copied");
+      setTimeout(() => {
+        btn.textContent = "Copy";
+        btn.classList.remove("copied");
+      }, 1800);
+    };
+
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(url).then(doCopy).catch(() => {
+        input.select();
+        input.setSelectionRange(0, 99999);
+        document.execCommand("copy");
+        doCopy();
+      });
+    } else {
+      input.select();
+      input.setSelectionRange(0, 99999);
+      document.execCommand("copy");
+      doCopy();
     }
   }
 
@@ -474,7 +592,7 @@
   }
 
   // ==========================================
-  // Copy Link
+  // Copy Link (from list)
   // ==========================================
   function copyLink(code) {
     const fullUrl = API_BASE + "/" + code;
@@ -694,7 +812,7 @@
           <td><span class="badge badge-os">${p.os}</span></td>
           <td><span class="badge badge-browser">${p.browser}</span></td>
           <td style="font-weight:600; color:var(--accent);">/${v.code}</td>
-          <td class="ua-cell" title="${escapeAttr(v.ua)}">${escapeHtml(v.ua)}</td>
+          <td class="ua-cell">${escapeHtml(v.ua)}</td>
         </tr>
       `;
     }).join("");
@@ -778,7 +896,6 @@
       weekday:"short", day:"2-digit", month:"short", year:"numeric"
     });
 
-  // Load data
   async function init() {
     await loadLinks();
     await loadVisits();
@@ -787,7 +904,6 @@
 
   init();
 
-  // Auto refresh every 30 seconds
   setInterval(() => {
     loadLinks();
     loadVisits();
